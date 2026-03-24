@@ -1,6 +1,10 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import { KpiCard } from "@/components/ui/KpiCard";
+import { SectionCard } from "@/components/ui/SectionCard";
+import { SeverityBadge } from "@/components/ui/SeverityBadge";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 
 type DocumentType =
   | "Protocol Summary"
@@ -36,12 +40,6 @@ type HealthResponse = {
   message: string;
 };
 
-type StatusState = {
-  tone: "green" | "yellow" | "red";
-  label: string;
-  detail?: string;
-};
-
 type DebugInfo = {
   mode: "live" | "mock";
   apiStatus: string;
@@ -51,6 +49,13 @@ type DebugInfo = {
   status?: number;
 };
 
+type StatusPresentation = {
+  tone: "live" | "mock" | "error";
+  label: string;
+  heading: string;
+  detail: string;
+};
+
 const documentTypes: DocumentType[] = [
   "Protocol Summary",
   "Clinical Study Report Section",
@@ -58,60 +63,42 @@ const documentTypes: DocumentType[] = [
   "Regulatory Response Draft",
 ];
 
-const severityStyles: Record<AnalysisIssue["severity"], string> = {
-  Low: "bg-slate-100 text-slate-700",
-  Medium: "bg-amber-100 text-amber-800",
-  High: "bg-rose-100 text-rose-800",
-};
-
-function ResultCard({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-panel">
-      <h2 className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">
-        {title}
-      </h2>
-      <div className="mt-4 text-sm text-slate-700">{children}</div>
-    </section>
-  );
-}
-
-function getStatusState(
+function getStatusPresentation(
   health: HealthResponse | null,
   result: AnalysisResponse | null,
-): StatusState {
+): StatusPresentation {
   if (result?._meta.mode === "mock" && result._meta.reason !== "OPENAI_API_KEY missing") {
     return {
-      tone: "red",
-      label: "🔴 API Error",
-      detail: result._meta.reason,
+      tone: "error",
+      label: "API Error",
+      heading: "Fallback mode active",
+      detail: result._meta.reason ?? "The service returned an unexpected response.",
     };
   }
 
   if (health?.mode === "mock") {
     return {
-      tone: "yellow",
-      label: "🟡 Mock (No API key)",
+      tone: "mock",
+      label: "Mock",
+      heading: "Mock mode active",
       detail: health.message,
     };
   }
 
   if (health?.mode === "live") {
     return {
-      tone: "green",
-      label: "🟢 Live",
+      tone: "live",
+      label: "Live",
+      heading: "Live analysis available",
       detail: health.message,
     };
   }
 
   return {
-    tone: "yellow",
-    label: "🟡 Checking system status...",
+    tone: "mock",
+    label: "Checking",
+    heading: "Checking environment",
+    detail: "Retrieving current system status.",
   };
 }
 
@@ -121,18 +108,18 @@ function getUserSuggestion(meta: AnalysisResponse["_meta"]) {
   }
 
   if (meta.errorType === "insufficient_quota") {
-    return "Add billing or increase quota, then retry.";
+    return "Update billing or quota settings, then retry the request.";
   }
 
   if (meta.errorType === "rate_limit" || meta.status === 429) {
-    return "Wait and retry later, or reduce request volume.";
+    return "Retry later or reduce request volume during testing.";
   }
 
   if (meta.errorType === "invalid_json") {
-    return "Retry the request. If it persists, review server logs.";
+    return "Retry the analysis. If the issue persists, review server logs.";
   }
 
-  return "Review server logs and retry the analysis.";
+  return "Review server diagnostics and retry the analysis.";
 }
 
 function getServiceNotice(meta: AnalysisResponse["_meta"]) {
@@ -141,6 +128,85 @@ function getServiceNotice(meta: AnalysisResponse["_meta"]) {
   }
 
   return null;
+}
+
+function ResultPlaceholder() {
+  return (
+    <div className="space-y-4">
+      <SectionCard
+        title="Analysis summary"
+        description="Results will appear here after a validation run."
+      >
+        <div className="grid gap-4 sm:grid-cols-2">
+          {Array.from({ length: 2 }).map((_, index) => (
+            <div
+              key={index}
+              className="h-28 rounded-2xl border border-dashed border-slate-200 bg-slate-50"
+            />
+          ))}
+        </div>
+        <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6">
+          <p className="text-sm leading-6 text-slate-600">
+            Submit a clinical draft to view quality score, review readiness, issues,
+            and suggested revisions.
+          </p>
+        </div>
+      </SectionCard>
+
+      <SectionCard
+        title="Issues"
+        description="Detected issues are grouped by quality dimension."
+      >
+        <div className="space-y-3">
+          {Array.from({ length: 2 }).map((_, index) => (
+            <div
+              key={index}
+              className="h-20 rounded-2xl border border-dashed border-slate-200 bg-slate-50"
+            />
+          ))}
+        </div>
+      </SectionCard>
+
+      <SectionCard
+        title="Suggestions"
+        description="Recommended revisions will be listed here."
+      >
+        <div className="space-y-3">
+          {Array.from({ length: 3 }).map((_, index) => (
+            <div
+              key={index}
+              className="h-12 rounded-xl border border-dashed border-slate-200 bg-slate-50"
+            />
+          ))}
+        </div>
+      </SectionCard>
+    </div>
+  );
+}
+
+function LoadingState() {
+  return (
+    <div className="space-y-4">
+      <SectionCard title="Analysis summary" description="Generating structured review output.">
+        <div className="grid gap-4 sm:grid-cols-2">
+          {Array.from({ length: 2 }).map((_, index) => (
+            <div
+              key={index}
+              className="h-28 animate-pulse rounded-2xl border border-slate-200 bg-slate-100"
+            />
+          ))}
+        </div>
+        <div className="mt-4 h-28 animate-pulse rounded-2xl border border-slate-200 bg-slate-100" />
+      </SectionCard>
+
+      {Array.from({ length: 3 }).map((_, index) => (
+        <div
+          key={index}
+          className="h-44 animate-pulse rounded-2xl border border-slate-200 bg-white shadow-sm"
+        />
+      ))}
+    </div>
+  );
 }
 
 export default function Home() {
@@ -162,7 +228,7 @@ export default function Home() {
         setHealth({
           hasOpenAIKey: false,
           mode: "mock",
-          message: "Unable to load health status; assuming mock mode",
+          message: "Unable to load health status; mock mode assumed.",
         });
       }
     }
@@ -235,306 +301,354 @@ export default function Home() {
     }
   };
 
-  const status = getStatusState(health, result);
+  const status = getStatusPresentation(health, result);
+  const isTextareaEmpty = content.trim().length === 0;
   const resultSuggestion = result ? getUserSuggestion(result._meta) : null;
   const serviceNotice = result ? getServiceNotice(result._meta) : null;
-  const statusStyles: Record<StatusState["tone"], string> = {
-    green: "border-emerald-200 bg-emerald-50 text-emerald-900",
-    yellow: "border-amber-200 bg-amber-50 text-amber-900",
-    red: "border-rose-200 bg-rose-50 text-rose-900",
-  };
 
   return (
-    <main className="min-h-screen px-4 py-10 sm:px-6 lg:px-8">
+    <main className="min-h-screen px-4 py-8 sm:px-6 sm:py-10 lg:px-8 lg:py-12">
       <div className="mx-auto max-w-6xl">
-        <div
-          className={`mb-6 rounded-2xl border px-5 py-4 shadow-panel ${statusStyles[status.tone]}`}
-        >
-          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-sm font-semibold">{status.label}</p>
-              {status.detail ? (
-                <p className="mt-1 text-sm opacity-90">{status.detail}</p>
-              ) : null}
+        <header className="rounded-3xl border border-slate-200 bg-white px-6 py-6 shadow-sm sm:px-8">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50">
+                <div className="h-5 w-5 rounded-md bg-slate-900" />
+              </div>
+              <div>
+                <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
+                  Clinical content quality
+                </p>
+                <h1 className="mt-1 text-3xl font-semibold tracking-tight text-slate-950">
+                  CliniFlow Lite
+                </h1>
+                <p className="mt-2 text-sm leading-6 text-slate-600 sm:text-base">
+                  AI-assisted pre-review validation for clinical content
+                </p>
+              </div>
             </div>
-            <div className="text-xs uppercase tracking-[0.14em] opacity-75">
-              System status
+
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">
+                Environment
+              </p>
+              <div className="mt-2 flex items-center justify-between gap-4">
+                <StatusBadge tone={status.tone} label={status.label} />
+              </div>
             </div>
           </div>
-        </div>
+        </header>
 
-        <div className="grid gap-8 lg:grid-cols-[1.15fr_0.85fr]">
-          <section className="rounded-3xl border border-slate-200 bg-white p-8 shadow-panel sm:p-10">
-            <div className="max-w-2xl">
-              <div className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium uppercase tracking-[0.14em] text-slate-600">
-                Clinical content QA prototype
+        <div className="mt-6 grid gap-6 lg:grid-cols-[1.08fr_0.92fr] lg:items-start">
+          <div className="space-y-4">
+            <SectionCard
+              title="Analyze draft"
+              description="Run a pre-review quality check before sending content into formal clinical review."
+            >
+              <form className="space-y-5" onSubmit={handleSubmit}>
+                <div className="space-y-2">
+                  <label
+                    htmlFor="documentType"
+                    className="text-sm font-medium text-slate-700"
+                  >
+                    Document type
+                  </label>
+                  <select
+                    id="documentType"
+                    value={documentType}
+                    onChange={(event) =>
+                      setDocumentType(event.target.value as DocumentType)
+                    }
+                    className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
+                  >
+                    {documentTypes.map((type) => (
+                      <option key={type} value={type}>
+                        {type}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-2">
+                  <label htmlFor="content" className="text-sm font-medium text-slate-700">
+                    Draft content
+                  </label>
+                  <textarea
+                    id="content"
+                    value={content}
+                    onChange={(event) => setContent(event.target.value)}
+                    placeholder="Paste clinical draft content for a structured pre-review validation pass."
+                    className="min-h-[360px] w-full rounded-2xl border border-slate-300 bg-white px-4 py-4 text-sm leading-6 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
+                  />
+                  <div className="flex items-center justify-between text-xs text-slate-500">
+                    <span>Use this review to catch gaps before internal review cycles begin.</span>
+                    <span>{content.length} characters</span>
+                  </div>
+                </div>
+
+                {error ? (
+                  <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                    {error}
+                  </div>
+                ) : null}
+
+                {serviceNotice ? (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    {serviceNotice}
+                  </div>
+                ) : null}
+
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <button
+                    type="submit"
+                    disabled={isLoading || isTextareaEmpty}
+                    className="inline-flex min-w-[160px] items-center justify-center rounded-xl bg-slate-950 px-5 py-3 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                  >
+                    {isLoading ? "Analyzing..." : "Analyze"}
+                  </button>
+                  <p className="text-sm text-slate-500">
+                    {result
+                      ? `Last run mode: ${result._meta.mode === "live" ? "Live" : "Mock"}`
+                      : "Results populate in the panel on the right."}
+                  </p>
+                </div>
+              </form>
+            </SectionCard>
+
+            <SectionCard title="System status" description={status.heading}>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <StatusBadge tone={status.tone} label={status.label} />
+                  <p className="mt-3 text-sm leading-6 text-slate-600">{status.detail}</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-right">
+                  <p className="text-xs uppercase tracking-[0.14em] text-slate-500">
+                    Workflow
+                  </p>
+                  <p className="mt-1 text-sm font-medium text-slate-900">Pre-review validation</p>
+                </div>
               </div>
-              <h1 className="mt-5 text-4xl font-semibold tracking-tight text-slate-900">
-                CliniFlow Lite
-              </h1>
-              <p className="mt-3 text-base text-slate-600">
-                AI-assisted pre-review validation for clinical content
+            </SectionCard>
+
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-5 py-4">
+              <p className="text-sm font-medium text-slate-900">Usage note</p>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                This interface is designed for quick internal quality screening. It
+                supports a lightweight drafting workflow and keeps fallback behavior
+                explicit when live AI analysis is unavailable.
               </p>
             </div>
+          </div>
 
-            <form className="mt-10 space-y-6" onSubmit={handleSubmit}>
-              <div className="space-y-2">
-                <label
-                  htmlFor="documentType"
-                  className="text-sm font-medium text-slate-700"
+          <div className="space-y-4">
+            {isLoading ? (
+              <LoadingState />
+            ) : result ? (
+              <>
+                <SectionCard
+                  title="Analysis summary"
+                  description="High-level result for the current draft."
                 >
-                  Document type
-                </label>
-                <select
-                  id="documentType"
-                  value={documentType}
-                  onChange={(event) =>
-                    setDocumentType(event.target.value as DocumentType)
-                  }
-                  className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <KpiCard
+                      label="Quality score"
+                      value={
+                        <div className="flex items-end gap-2">
+                          <span className="text-4xl font-semibold tracking-tight">
+                            {result.qualityScore}
+                          </span>
+                          <span className="pb-1 text-sm text-slate-500">/ 100</span>
+                        </div>
+                      }
+                      supporting="Calculated from completeness, clarity, consistency, and compliance risk signals."
+                    />
+                    <KpiCard
+                      label="Review readiness"
+                      value={
+                        <div className="flex items-center gap-3">
+                          <StatusBadge
+                            tone={result.readyForReview ? "live" : "mock"}
+                            label={result.readyForReview ? "Ready for review" : "Needs revision"}
+                          />
+                        </div>
+                      }
+                      supporting={
+                        result._meta.mode === "live"
+                          ? "Generated using live analysis mode."
+                          : "Generated using fallback mock mode."
+                      }
+                    />
+                  </div>
+
+                  <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">
+                        Run mode
+                      </span>
+                      <StatusBadge
+                        tone={
+                          result._meta.mode === "live"
+                            ? "live"
+                            : result._meta.reason === "OPENAI_API_KEY missing"
+                              ? "mock"
+                              : "error"
+                        }
+                        label={result._meta.mode === "live" ? "Live" : "Mock"}
+                      />
+                    </div>
+                    <p className="mt-3 text-sm leading-6 text-slate-600">{result.summary}</p>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                        <p className="text-xs uppercase tracking-[0.14em] text-slate-500">
+                          Reason
+                        </p>
+                        <p className="mt-1 text-sm text-slate-700">
+                          {result._meta.reason ?? "Live analysis completed without fallback."}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                        <p className="text-xs uppercase tracking-[0.14em] text-slate-500">
+                          Suggested next step
+                        </p>
+                        <p className="mt-1 text-sm text-slate-700">{resultSuggestion}</p>
+                      </div>
+                    </div>
+                    <div className="mt-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
+                      <p className="text-xs uppercase tracking-[0.14em] text-slate-500">
+                        Missing sections
+                      </p>
+                      {result.missingSections.length > 0 ? (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {result.missingSections.map((section) => (
+                            <span
+                              key={section}
+                              className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-700"
+                            >
+                              {section}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="mt-1 text-sm text-slate-700">
+                          No missing sections detected.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </SectionCard>
+
+                <SectionCard
+                  title="Issues"
+                  description="Detected issues are grouped by category and severity."
                 >
-                  {documentTypes.map((type) => (
-                    <option key={type} value={type}>
-                      {type}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                  {result.issues.length > 0 ? (
+                    <div className="space-y-3">
+                      {result.issues.map((issue, index) => (
+                        <div
+                          key={`${issue.category}-${index}`}
+                          className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-semibold text-slate-900">
+                                {issue.category}
+                              </p>
+                            </div>
+                            <SeverityBadge severity={issue.severity} />
+                          </div>
+                          <p className="mt-3 text-sm leading-6 text-slate-600">
+                            {issue.explanation}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                      <p className="text-sm leading-6 text-slate-600">
+                        No material issues were detected in the current draft.
+                      </p>
+                    </div>
+                  )}
+                </SectionCard>
 
-              <div className="space-y-2">
-                <label htmlFor="content" className="text-sm font-medium text-slate-700">
-                  Draft content
-                </label>
-                <textarea
-                  id="content"
-                  value={content}
-                  onChange={(event) => setContent(event.target.value)}
-                  placeholder="Paste or draft clinical content here for pre-review validation."
-                  className="min-h-[320px] w-full rounded-xl border border-slate-300 bg-white px-4 py-4 text-sm leading-6 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
-                />
-                <div className="flex items-center justify-between text-xs text-slate-500">
-                  <span>
-                    Run a quick completeness and quality pass before formal review.
-                  </span>
-                  <span>{content.length} characters</span>
-                </div>
-              </div>
-
-              {error ? (
-                <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                  {error}
-                </div>
-              ) : null}
-
-              {serviceNotice ? (
-                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                  {serviceNotice}
-                </div>
-              ) : null}
-
-              <div className="flex items-center gap-3">
-                <button
-                  type="submit"
-                  disabled={isLoading}
-                  className="inline-flex min-w-[148px] items-center justify-center rounded-xl bg-slate-900 px-5 py-3 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+                <SectionCard
+                  title="Suggestions"
+                  description="Recommended improvements for the next revision."
                 >
-                  {isLoading ? "Analyzing..." : "Analyze"}
-                </button>
-                <span className="text-sm text-slate-500">
-                  {result
-                    ? `Current result mode: ${result._meta.mode === "live" ? "Live" : "Mock"}`
-                    : "Results appear below"}
-                </span>
-              </div>
-            </form>
-          </section>
-
-          <aside className="space-y-4 rounded-3xl border border-slate-200 bg-slate-900 p-8 text-slate-50 shadow-panel">
-            <h2 className="text-lg font-semibold">How it works</h2>
-            <p className="text-sm leading-6 text-slate-300">
-              CliniFlow Lite provides a lightweight pre-review screen for common
-              clinical drafting workflows. It checks for missing content, highlights
-              issues, and returns practical revision guidance in a structured format.
-            </p>
-            <div className="grid gap-3">
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                <p className="text-xs uppercase tracking-[0.16em] text-slate-400">
-                  Review focus
-                </p>
-                <p className="mt-2 text-sm text-slate-100">
-                  Completeness, clarity, internal consistency, and compliance risk.
-                </p>
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                <p className="text-xs uppercase tracking-[0.16em] text-slate-400">
-                  Demo behavior
-                </p>
-                <p className="mt-2 text-sm text-slate-100">
-                  If no API key is configured, the backend returns a deterministic mock
-                  result so the prototype remains usable.
-                </p>
-              </div>
-            </div>
-          </aside>
-        </div>
-
-        <section className="mt-8">
-          {isLoading ? (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {Array.from({ length: 6 }).map((_, index) => (
-                <div
-                  key={index}
-                  className="h-40 animate-pulse rounded-2xl border border-slate-200 bg-white shadow-panel"
-                />
-              ))}
-            </div>
-          ) : result ? (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              <ResultCard title="Quality score">
-                <div className="flex items-end gap-2">
-                  <span className="text-4xl font-semibold text-slate-900">
-                    {result.qualityScore}
-                  </span>
-                  <span className="pb-1 text-sm text-slate-500">/ 100</span>
-                </div>
-                <p className="mt-4 leading-6 text-slate-600">{result.summary}</p>
-              </ResultCard>
-
-              <ResultCard title="Ready for review">
-                <div
-                  className={`inline-flex rounded-full px-3 py-1 text-sm font-medium ${
-                    result.readyForReview
-                      ? "bg-emerald-100 text-emerald-800"
-                      : "bg-amber-100 text-amber-800"
-                  }`}
-                >
-                  {result.readyForReview ? "Yes" : "Not yet"}
-                </div>
-                <p className="mt-4 leading-6 text-slate-600">
-                  {result.readyForReview
-                    ? "The draft appears suitable for formal review with routine edits."
-                    : "Address the flagged gaps before sending this draft to formal review."}
-                </p>
-              </ResultCard>
-
-              <ResultCard title="Missing sections">
-                {result.missingSections.length > 0 ? (
                   <ul className="space-y-3">
-                    {result.missingSections.map((section) => (
+                    {result.suggestions.map((suggestion) => (
                       <li
-                        key={section}
-                        className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3"
+                        key={suggestion}
+                        className="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3"
                       >
-                        {section}
+                        <span className="mt-1 h-2.5 w-2.5 rounded-full bg-slate-400" />
+                        <span className="text-sm leading-6 text-slate-700">{suggestion}</span>
                       </li>
                     ))}
                   </ul>
-                ) : (
-                  <p className="leading-6 text-slate-600">
-                    No clearly missing sections were detected.
-                  </p>
-                )}
-              </ResultCard>
+                </SectionCard>
 
-              <ResultCard title="Issues detected">
-                {result.issues.length > 0 ? (
-                  <div className="space-y-3">
-                    {result.issues.map((issue, index) => (
-                      <div
-                        key={`${issue.category}-${index}`}
-                        className="rounded-xl border border-slate-200 bg-slate-50 p-4"
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <p className="font-medium text-slate-900">{issue.category}</p>
-                          <span
-                            className={`rounded-full px-2.5 py-1 text-xs font-medium ${severityStyles[issue.severity]}`}
-                          >
-                            {issue.severity}
-                          </span>
-                        </div>
-                        <p className="mt-3 leading-6 text-slate-600">
-                          {issue.explanation}
+                <SectionCard
+                  title="Developer log"
+                  description="Latest run diagnostics for demo and troubleshooting purposes."
+                >
+                  <div className="rounded-2xl border border-slate-200 bg-slate-950 px-4 py-4 text-slate-200">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">
+                          Mode
+                        </p>
+                        <p className="mt-1 font-mono text-sm">{debugInfo?.mode ?? "N/A"}</p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">
+                          API status
+                        </p>
+                        <p className="mt-1 font-mono text-sm">
+                          {debugInfo?.apiStatus ?? "N/A"}
                         </p>
                       </div>
-                    ))}
+                      <div>
+                        <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">
+                          Timestamp
+                        </p>
+                        <p className="mt-1 font-mono text-sm">
+                          {debugInfo?.timestamp ?? "N/A"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">
+                          Reason
+                        </p>
+                        <p className="mt-1 font-mono text-sm">
+                          {debugInfo?.reason ?? "None"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">
+                          Error type
+                        </p>
+                        <p className="mt-1 font-mono text-sm">
+                          {debugInfo?.errorType ?? "None"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">
+                          Status code
+                        </p>
+                        <p className="mt-1 font-mono text-sm">
+                          {debugInfo?.status ?? "None"}
+                        </p>
+                      </div>
+                    </div>
                   </div>
-                ) : (
-                  <p className="leading-6 text-slate-600">
-                    No significant issues were detected.
-                  </p>
-                )}
-              </ResultCard>
-
-              <ResultCard title="Suggestions">
-                <ul className="space-y-3">
-                  {result.suggestions.map((suggestion) => (
-                    <li
-                      key={suggestion}
-                      className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 leading-6"
-                    >
-                      {suggestion}
-                    </li>
-                  ))}
-                </ul>
-              </ResultCard>
-
-              <ResultCard title="Run mode">
-                <div className="space-y-3">
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                    <span className="text-xs uppercase tracking-[0.14em] text-slate-500">
-                      Mode
-                    </span>
-                    <p className="mt-1 font-medium text-slate-900">
-                      {result._meta.mode === "live" ? "Live" : "Mock"}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                    <span className="text-xs uppercase tracking-[0.14em] text-slate-500">
-                      Reason
-                    </span>
-                    <p className="mt-1 text-slate-700">
-                      {result._meta.reason ?? "Live mode active; no fallback applied."}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                    <span className="text-xs uppercase tracking-[0.14em] text-slate-500">
-                      Suggestion
-                    </span>
-                    <p className="mt-1 text-slate-700">
-                      {resultSuggestion}
-                    </p>
-                  </div>
-                </div>
-              </ResultCard>
-            </div>
-          ) : (
-            <div className="rounded-2xl border border-dashed border-slate-300 bg-white/70 p-10 text-center shadow-panel">
-              <h2 className="text-lg font-semibold text-slate-900">
-                Structured analysis results
-              </h2>
-              <p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-                Submit a draft to view score, review readiness, missing sections,
-                detected issues, and suggested next steps.
-              </p>
-            </div>
-          )}
-        </section>
-
-        {debugInfo ? (
-          <section className="mt-6 rounded-2xl border border-slate-200 bg-slate-950 px-5 py-4 text-sm text-slate-200 shadow-panel">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-              Developer log
-            </p>
-            <div className="mt-3 space-y-1 font-mono text-xs leading-6">
-              <p>Mode: {debugInfo.mode}</p>
-              <p>API status: {debugInfo.apiStatus}</p>
-              <p>Timestamp: {debugInfo.timestamp}</p>
-              <p>Reason: {debugInfo.reason ?? "None"}</p>
-              <p>Error type: {debugInfo.errorType ?? "None"}</p>
-              <p>Status: {debugInfo.status ?? "None"}</p>
-            </div>
-          </section>
-        ) : null}
+                </SectionCard>
+              </>
+            ) : (
+              <ResultPlaceholder />
+            )}
+          </div>
+        </div>
       </div>
     </main>
   );

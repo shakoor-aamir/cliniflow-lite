@@ -31,8 +31,7 @@ body {
   margin: 0;
   min-height: 100vh;
   background:
-    radial-gradient(circle at top left, rgba(15, 95, 134, 0.08), transparent 28%),
-    linear-gradient(180deg, #f8fbfd 0%, var(--background) 45%, #eef3f7 100%);
+    linear-gradient(180deg, #fafcfd 0%, #f3f6f9 55%, #eef2f6 100%);
   color: var(--foreground);
 }
 
