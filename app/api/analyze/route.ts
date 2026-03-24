@@ -21,6 +21,18 @@ type AnalysisResponse = {
   summary: string;
 };
 
+type AnalysisMeta = {
+  mode: "live" | "mock";
+  reason?: string;
+  errorType?: string;
+  status?: number;
+  timestamp: string;
+};
+
+type AnalysisApiResponse = AnalysisResponse & {
+  _meta: AnalysisMeta;
+};
+
 const validDocumentTypes: DocumentType[] = [
   "Protocol Summary",
   "Clinical Study Report Section",
@@ -258,23 +270,85 @@ function validateAnalysisResponse(value: unknown): value is AnalysisResponse {
   );
 }
 
-async function analyzeWithOpenAI(
-  documentType: DocumentType,
-  content: string,
-): Promise<AnalysisResponse> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    throw new Error("OPENAI_API_KEY is not configured.");
+class OpenAIStatusError extends Error {
+  status: number;
+  errorType?: string;
+  timestamp: string;
+  responseBody: string;
+  reason: string;
+
+  constructor({
+    status,
+    message,
+    errorType,
+    timestamp,
+    responseBody,
+    reason,
+  }: {
+    status: number;
+    message: string;
+    errorType?: string;
+    timestamp: string;
+    responseBody: string;
+    reason: string;
+  }) {
+    super(message);
+    this.name = "OpenAIStatusError";
+    this.status = status;
+    this.errorType = errorType;
+    this.timestamp = timestamp;
+    this.responseBody = responseBody;
+    this.reason = reason;
+  }
+}
+
+function buildTimestamp() {
+  return new Date().toISOString();
+}
+
+function parseOpenAIError(
+  status: number,
+  responseText: string,
+): { reason: string; errorType?: string } {
+  let errorType: string | undefined;
+
+  try {
+    const parsed = JSON.parse(responseText) as {
+      error?: { code?: string; type?: string; message?: string };
+    };
+    errorType = parsed.error?.code ?? parsed.error?.type;
+  } catch {
+    errorType = undefined;
   }
 
-  const prompt = `Review the clinical content draft and return JSON only.
+  const normalizedText = responseText.toLowerCase();
 
-Document type: ${documentType}
+  if (errorType === "insufficient_quota" || normalizedText.includes("insufficient_quota")) {
+    return {
+      reason: "Quota exceeded - check billing",
+      errorType: "insufficient_quota",
+    };
+  }
 
-Draft:
-${content}`;
+  if (
+    status === 429 ||
+    errorType === "rate_limit" ||
+    normalizedText.includes("rate limit")
+  ) {
+    return {
+      reason: "Rate limit hit - retry later",
+      errorType: "rate_limit",
+    };
+  }
 
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+  return {
+    reason: `OpenAI API failed: ${status}`,
+    errorType,
+  };
+}
+
+async function requestOpenAI(prompt: string, apiKey: string) {
+  return fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -300,10 +374,81 @@ ${content}`;
       },
     }),
   });
+}
 
-  if (!response.ok) {
+async function analyzeWithOpenAI(
+  documentType: DocumentType,
+  content: string,
+): Promise<AnalysisResponse> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error("OPENAI_API_KEY is not configured.");
+  }
+
+  const prompt = `Review the clinical content draft and return JSON only.
+
+Document type: ${documentType}
+
+Draft:
+${content}`;
+
+  console.log("Calling OpenAI analyze endpoint...");
+
+  let response = await requestOpenAI(prompt, apiKey);
+  console.log("OpenAI response status:", response.status);
+
+  if (response.status === 429) {
+    const retryTimestamp = buildTimestamp();
+    const retryBody = await response.text();
+    const retryDetails = parseOpenAIError(response.status, retryBody);
+
+    console.log("OpenAI error timestamp:", retryTimestamp);
+    console.log("OpenAI error status:", response.status);
+    console.log("OpenAI error body:", retryBody);
+    console.log("Retrying once after 2000ms due to 429...");
+
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    response = await requestOpenAI(prompt, apiKey);
+    console.log("OpenAI retry response status:", response.status);
+
+    if (!response.ok) {
+      const retryFailureTimestamp = buildTimestamp();
+      const retryFailureBody = await response.text();
+      const retryFailureDetails = parseOpenAIError(
+        response.status,
+        retryFailureBody,
+      );
+
+      console.log("OpenAI retry error timestamp:", retryFailureTimestamp);
+      console.log("OpenAI retry error status:", response.status);
+      console.log("OpenAI retry error body:", retryFailureBody);
+
+      throw new OpenAIStatusError({
+        status: response.status,
+        message: `OpenAI request failed: ${retryFailureBody}`,
+        errorType: retryFailureDetails.errorType ?? retryDetails.errorType,
+        timestamp: retryFailureTimestamp,
+        responseBody: retryFailureBody,
+        reason: retryFailureDetails.reason,
+      });
+    }
+  } else if (!response.ok) {
+    const timestamp = buildTimestamp();
     const errorText = await response.text();
-    throw new Error(`OpenAI request failed: ${errorText}`);
+    const errorDetails = parseOpenAIError(response.status, errorText);
+
+    console.log("OpenAI error timestamp:", timestamp);
+    console.log("OpenAI error status:", response.status);
+    console.log("OpenAI error body:", errorText);
+
+    throw new OpenAIStatusError({
+      status: response.status,
+      message: `OpenAI request failed: ${errorText}`,
+      errorType: errorDetails.errorType,
+      timestamp,
+      responseBody: errorText,
+      reason: errorDetails.reason,
+    });
   }
 
   const payload = (await response.json()) as {
@@ -316,15 +461,38 @@ ${content}`;
 
   const messageContent = payload.choices?.[0]?.message?.content;
   if (!messageContent) {
-    throw new Error("OpenAI response did not include structured content.");
+    throw new Error("Invalid JSON from model");
   }
 
-  const parsed = JSON.parse(messageContent) as unknown;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(messageContent);
+  } catch {
+    throw new Error("Invalid JSON from model");
+  }
+
   if (!validateAnalysisResponse(parsed)) {
-    throw new Error("OpenAI response did not match the expected analysis shape.");
+    throw new Error("Invalid JSON from model");
   }
 
   return parsed;
+}
+
+function mockResponse(
+  documentType: DocumentType,
+  content: string,
+  meta: Omit<AnalysisMeta, "mode" | "timestamp"> & { timestamp?: string },
+): AnalysisApiResponse {
+  return {
+    ...generateMockAnalysis(documentType, content),
+    _meta: {
+      mode: "mock",
+      reason: meta.reason,
+      errorType: meta.errorType,
+      status: meta.status,
+      timestamp: meta.timestamp ?? buildTimestamp(),
+    },
+  };
 }
 
 export async function POST(request: Request) {
@@ -351,24 +519,53 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!process.env.OPENAI_API_KEY) {
-      return NextResponse.json({
-        ...generateMockAnalysis(documentType, content),
-        mode: "mock",
-      });
+    const hasOpenAIKey = Boolean(process.env.OPENAI_API_KEY);
+    console.log("Mode:", hasOpenAIKey ? "live" : "mock");
+    console.log("OpenAI key exists:", hasOpenAIKey);
+
+    if (!hasOpenAIKey) {
+      const reason = "OPENAI_API_KEY missing";
+      console.log("Fallback reason:", reason);
+      return NextResponse.json(
+        mockResponse(documentType, content, {
+          reason,
+        }),
+      );
     }
 
     try {
       const analysis = await analyzeWithOpenAI(documentType, content);
+      console.log("Analyze completed in live mode.");
       return NextResponse.json({
         ...analysis,
-        mode: "openai",
+        _meta: {
+          mode: "live",
+          timestamp: buildTimestamp(),
+        },
       });
-    } catch {
-      return NextResponse.json({
-        ...generateMockAnalysis(documentType, content),
-        mode: "mock",
-      });
+    } catch (error) {
+      const meta =
+        error instanceof OpenAIStatusError
+          ? {
+              reason: error.reason,
+              errorType: error.errorType,
+              status: error.status,
+              timestamp: error.timestamp,
+            }
+          : error instanceof Error && error.message === "Invalid JSON from model"
+            ? {
+                reason: "Invalid JSON from model",
+                errorType: "invalid_json",
+                timestamp: buildTimestamp(),
+              }
+            : {
+                reason: "OpenAI API failed: unexpected error",
+                errorType: "unexpected_error",
+                timestamp: buildTimestamp(),
+              };
+
+      console.log("Fallback reason:", meta.reason);
+      return NextResponse.json(mockResponse(documentType, content, meta));
     }
   } catch {
     return NextResponse.json(

@@ -23,3 +23,19 @@ Can AI-assisted pre-review checks improve content quality and reduce reviewer re
 ## Notes
 - Includes mock fallback to ensure stable demo without API dependency
 - Focused on product validation, not full system implementation
+
+## Environment Setup
+1. Create `.env.local` in the project root.
+2. Add:
+
+```bash
+OPENAI_API_KEY=your_key_here
+```
+
+3. Restart the dev server:
+
+```bash
+npm run dev
+```
+
+If the key is missing, the app runs in mock mode automatically. Live mode activates automatically when `OPENAI_API_KEY` is present.

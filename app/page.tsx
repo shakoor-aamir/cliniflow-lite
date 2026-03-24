@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 type DocumentType =
   | "Protocol Summary"
@@ -21,7 +21,34 @@ type AnalysisResponse = {
   issues: AnalysisIssue[];
   suggestions: string[];
   summary: string;
-  mode?: "mock" | "openai";
+  _meta: {
+    mode: "live" | "mock";
+    reason?: string;
+    errorType?: string;
+    status?: number;
+    timestamp: string;
+  };
+};
+
+type HealthResponse = {
+  hasOpenAIKey: boolean;
+  mode: "live" | "mock";
+  message: string;
+};
+
+type StatusState = {
+  tone: "green" | "yellow" | "red";
+  label: string;
+  detail?: string;
+};
+
+type DebugInfo = {
+  mode: "live" | "mock";
+  apiStatus: string;
+  timestamp: string;
+  reason?: string;
+  errorType?: string;
+  status?: number;
 };
 
 const documentTypes: DocumentType[] = [
@@ -54,12 +81,94 @@ function ResultCard({
   );
 }
 
+function getStatusState(
+  health: HealthResponse | null,
+  result: AnalysisResponse | null,
+): StatusState {
+  if (result?._meta.mode === "mock" && result._meta.reason !== "OPENAI_API_KEY missing") {
+    return {
+      tone: "red",
+      label: "🔴 API Error",
+      detail: result._meta.reason,
+    };
+  }
+
+  if (health?.mode === "mock") {
+    return {
+      tone: "yellow",
+      label: "🟡 Mock (No API key)",
+      detail: health.message,
+    };
+  }
+
+  if (health?.mode === "live") {
+    return {
+      tone: "green",
+      label: "🟢 Live",
+      detail: health.message,
+    };
+  }
+
+  return {
+    tone: "yellow",
+    label: "🟡 Checking system status...",
+  };
+}
+
+function getUserSuggestion(meta: AnalysisResponse["_meta"]) {
+  if (meta.reason === "OPENAI_API_KEY missing") {
+    return "Add OPENAI_API_KEY to enable live analysis.";
+  }
+
+  if (meta.errorType === "insufficient_quota") {
+    return "Add billing or increase quota, then retry.";
+  }
+
+  if (meta.errorType === "rate_limit" || meta.status === 429) {
+    return "Wait and retry later, or reduce request volume.";
+  }
+
+  if (meta.errorType === "invalid_json") {
+    return "Retry the request. If it persists, review server logs.";
+  }
+
+  return "Review server logs and retry the analysis.";
+}
+
+function getServiceNotice(meta: AnalysisResponse["_meta"]) {
+  if (meta.status === 429) {
+    return "AI service temporarily unavailable. This is usually due to rate limits or missing billing. The system is running in fallback mode.";
+  }
+
+  return null;
+}
+
 export default function Home() {
   const [documentType, setDocumentType] = useState<DocumentType>("Protocol Summary");
   const [content, setContent] = useState("");
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState<AnalysisResponse | null>(null);
+  const [health, setHealth] = useState<HealthResponse | null>(null);
+  const [debugInfo, setDebugInfo] = useState<DebugInfo | null>(null);
+
+  useEffect(() => {
+    async function loadHealth() {
+      try {
+        const response = await fetch("/api/health");
+        const payload = (await response.json()) as HealthResponse;
+        setHealth(payload);
+      } catch {
+        setHealth({
+          hasOpenAIKey: false,
+          mode: "mock",
+          message: "Unable to load health status; assuming mock mode",
+        });
+      }
+    }
+
+    void loadHealth();
+  }, []);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -68,6 +177,7 @@ export default function Home() {
     if (!trimmedContent) {
       setError("Enter draft content before running analysis.");
       setResult(null);
+      setDebugInfo(null);
       return;
     }
 
@@ -95,8 +205,26 @@ export default function Home() {
       }
 
       setResult(payload);
+      setDebugInfo({
+        mode: payload._meta.mode,
+        apiStatus:
+          payload._meta.mode === "live"
+            ? "Operational"
+            : payload._meta.reason === "OPENAI_API_KEY missing"
+              ? "Mock mode active"
+              : "Fallback active after API error",
+        timestamp: payload._meta.timestamp,
+        reason: payload._meta.reason,
+        errorType: payload._meta.errorType,
+        status: payload._meta.status,
+      });
     } catch (submissionError) {
       setResult(null);
+      setDebugInfo({
+        mode: "mock",
+        apiStatus: "Request failed before analysis completed",
+        timestamp: new Date().toISOString(),
+      });
       setError(
         submissionError instanceof Error
           ? submissionError.message
@@ -107,9 +235,34 @@ export default function Home() {
     }
   };
 
+  const status = getStatusState(health, result);
+  const resultSuggestion = result ? getUserSuggestion(result._meta) : null;
+  const serviceNotice = result ? getServiceNotice(result._meta) : null;
+  const statusStyles: Record<StatusState["tone"], string> = {
+    green: "border-emerald-200 bg-emerald-50 text-emerald-900",
+    yellow: "border-amber-200 bg-amber-50 text-amber-900",
+    red: "border-rose-200 bg-rose-50 text-rose-900",
+  };
+
   return (
     <main className="min-h-screen px-4 py-10 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-6xl">
+        <div
+          className={`mb-6 rounded-2xl border px-5 py-4 shadow-panel ${statusStyles[status.tone]}`}
+        >
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold">{status.label}</p>
+              {status.detail ? (
+                <p className="mt-1 text-sm opacity-90">{status.detail}</p>
+              ) : null}
+            </div>
+            <div className="text-xs uppercase tracking-[0.14em] opacity-75">
+              System status
+            </div>
+          </div>
+        </div>
+
         <div className="grid gap-8 lg:grid-cols-[1.15fr_0.85fr]">
           <section className="rounded-3xl border border-slate-200 bg-white p-8 shadow-panel sm:p-10">
             <div className="max-w-2xl">
@@ -173,6 +326,12 @@ export default function Home() {
                 </div>
               ) : null}
 
+              {serviceNotice ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                  {serviceNotice}
+                </div>
+              ) : null}
+
               <div className="flex items-center gap-3">
                 <button
                   type="submit"
@@ -182,11 +341,9 @@ export default function Home() {
                   {isLoading ? "Analyzing..." : "Analyze"}
                 </button>
                 <span className="text-sm text-slate-500">
-                  {result?.mode === "mock"
-                    ? "Mock analysis mode"
-                    : result?.mode === "openai"
-                      ? "OpenAI analysis mode"
-                      : "Results appear below"}
+                  {result
+                    ? `Current result mode: ${result._meta.mode === "live" ? "Live" : "Mock"}`
+                    : "Results appear below"}
                 </span>
               </div>
             </form>
@@ -320,6 +477,35 @@ export default function Home() {
                   ))}
                 </ul>
               </ResultCard>
+
+              <ResultCard title="Run mode">
+                <div className="space-y-3">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <span className="text-xs uppercase tracking-[0.14em] text-slate-500">
+                      Mode
+                    </span>
+                    <p className="mt-1 font-medium text-slate-900">
+                      {result._meta.mode === "live" ? "Live" : "Mock"}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <span className="text-xs uppercase tracking-[0.14em] text-slate-500">
+                      Reason
+                    </span>
+                    <p className="mt-1 text-slate-700">
+                      {result._meta.reason ?? "Live mode active; no fallback applied."}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <span className="text-xs uppercase tracking-[0.14em] text-slate-500">
+                      Suggestion
+                    </span>
+                    <p className="mt-1 text-slate-700">
+                      {resultSuggestion}
+                    </p>
+                  </div>
+                </div>
+              </ResultCard>
             </div>
           ) : (
             <div className="rounded-2xl border border-dashed border-slate-300 bg-white/70 p-10 text-center shadow-panel">
@@ -333,6 +519,22 @@ export default function Home() {
             </div>
           )}
         </section>
+
+        {debugInfo ? (
+          <section className="mt-6 rounded-2xl border border-slate-200 bg-slate-950 px-5 py-4 text-sm text-slate-200 shadow-panel">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+              Developer log
+            </p>
+            <div className="mt-3 space-y-1 font-mono text-xs leading-6">
+              <p>Mode: {debugInfo.mode}</p>
+              <p>API status: {debugInfo.apiStatus}</p>
+              <p>Timestamp: {debugInfo.timestamp}</p>
+              <p>Reason: {debugInfo.reason ?? "None"}</p>
+              <p>Error type: {debugInfo.errorType ?? "None"}</p>
+              <p>Status: {debugInfo.status ?? "None"}</p>
+            </div>
+          </section>
+        ) : null}
       </div>
     </main>
   );
