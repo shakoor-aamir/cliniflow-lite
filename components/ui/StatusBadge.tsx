@@ -21,9 +21,9 @@ export function StatusBadge({
 }) {
   return (
     <span
-      className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium ${statusStyles[tone]}`}
+      className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold tracking-[0.02em] ${statusStyles[tone]}`}
     >
-      <span className={`h-2 w-2 rounded-full ${dotStyles[tone]}`} />
+      <span className={`h-1.5 w-1.5 rounded-full ${dotStyles[tone]}`} />
       {label}
     </span>
   );

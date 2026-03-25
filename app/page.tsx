@@ -146,6 +146,9 @@ function ResultPlaceholder() {
           ))}
         </div>
         <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6">
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">
+            Awaiting draft input
+          </p>
           <p className="text-sm leading-6 text-slate-600">
             Submit a clinical draft to view quality score, review readiness, issues,
             and suggested revisions.
@@ -309,15 +312,20 @@ export default function Home() {
   return (
     <main className="min-h-screen px-4 py-8 sm:px-6 sm:py-10 lg:px-8 lg:py-12">
       <div className="mx-auto max-w-6xl">
-        <header className="rounded-3xl border border-slate-200 bg-white px-6 py-6 shadow-sm sm:px-8">
+        <header className="rounded-3xl border border-slate-200 bg-white px-6 py-6 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:px-8">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-start gap-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50">
-                <div className="h-5 w-5 rounded-md bg-slate-900" />
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 shadow-sm">
+                <div className="grid h-5 w-5 grid-cols-2 gap-0.5">
+                  <span className="rounded-sm bg-slate-900" />
+                  <span className="rounded-sm bg-slate-300" />
+                  <span className="rounded-sm bg-slate-300" />
+                  <span className="rounded-sm bg-slate-900" />
+                </div>
               </div>
               <div>
                 <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
-                  Clinical content quality
+                  Internal workflow tool
                 </p>
                 <h1 className="mt-1 text-3xl font-semibold tracking-tight text-slate-950">
                   CliniFlow Lite
@@ -328,13 +336,14 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+            <div className="min-w-[220px] rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
               <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">
-                Environment
+                System status
               </p>
               <div className="mt-2 flex items-center justify-between gap-4">
                 <StatusBadge tone={status.tone} label={status.label} />
               </div>
+              <p className="mt-2 text-sm leading-6 text-slate-600">{status.detail}</p>
             </div>
           </div>
         </header>
@@ -416,7 +425,7 @@ export default function Home() {
             </SectionCard>
 
             <SectionCard title="System status" description={status.heading}>
-              <div className="flex items-start justify-between gap-4">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <StatusBadge tone={status.tone} label={status.label} />
                   <p className="mt-3 text-sm leading-6 text-slate-600">{status.detail}</p>
@@ -449,34 +458,63 @@ export default function Home() {
                   title="Analysis summary"
                   description="High-level result for the current draft."
                 >
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <KpiCard
-                      label="Quality score"
-                      value={
-                        <div className="flex items-end gap-2">
-                          <span className="text-4xl font-semibold tracking-tight">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                    <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <p className="text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
+                          Quality score
+                        </p>
+                        <div className="mt-3 flex items-end gap-2">
+                          <span className="text-5xl font-semibold tracking-tight text-slate-950">
                             {result.qualityScore}
                           </span>
-                          <span className="pb-1 text-sm text-slate-500">/ 100</span>
+                          <span className="pb-2 text-sm text-slate-500">/ 100</span>
                         </div>
-                      }
-                      supporting="Calculated from completeness, clarity, consistency, and compliance risk signals."
-                    />
+                      </div>
+                      <div className="space-y-3">
+                        <StatusBadge
+                          tone={result.readyForReview ? "live" : "mock"}
+                          label={result.readyForReview ? "Ready for review" : "Needs revision"}
+                        />
+                        <div>
+                          <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">
+                            Mode
+                          </p>
+                          <p className="mt-1 text-sm font-medium text-slate-900">
+                            {result._meta.mode === "live" ? "Live analysis" : "Mock analysis"}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                    <p className="mt-4 max-w-2xl text-sm leading-6 text-slate-600">
+                      {result.summary}
+                    </p>
+                  </div>
+
+                  <div className="mt-4 grid gap-4 sm:grid-cols-2">
                     <KpiCard
                       label="Review readiness"
                       value={
-                        <div className="flex items-center gap-3">
-                          <StatusBadge
-                            tone={result.readyForReview ? "live" : "mock"}
-                            label={result.readyForReview ? "Ready for review" : "Needs revision"}
-                          />
-                        </div>
+                        <p className="text-lg font-semibold text-slate-900">
+                          {result.readyForReview ? "Suitable for formal review" : "Revision recommended"}
+                        </p>
                       }
                       supporting={
                         result._meta.mode === "live"
                           ? "Generated using live analysis mode."
                           : "Generated using fallback mock mode."
                       }
+                    />
+                    <KpiCard
+                      label="Content coverage"
+                      value={
+                        <p className="text-lg font-semibold text-slate-900">
+                          {result.missingSections.length === 0
+                            ? "Complete"
+                            : `${result.missingSections.length} gap${result.missingSections.length === 1 ? "" : "s"} detected`}
+                        </p>
+                      }
+                      supporting="Missing sections are listed below when structural gaps are identified."
                     />
                   </div>
 
@@ -592,7 +630,7 @@ export default function Home() {
                   title="Developer log"
                   description="Latest run diagnostics for demo and troubleshooting purposes."
                 >
-                  <div className="rounded-2xl border border-slate-200 bg-slate-950 px-4 py-4 text-slate-200">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-900 px-4 py-4 text-slate-200">
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div>
                         <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">
