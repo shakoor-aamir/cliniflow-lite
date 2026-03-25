@@ -8,6 +8,7 @@ Can AI-assisted pre-review checks improve content quality and reduce reviewer re
 
 ## Features
 - Document type selection
+- PDF upload with text extraction into the draft editor
 - Content analysis using AI (or mock fallback)
 - Quality scoring
 - Missing sections detection
@@ -19,6 +20,7 @@ Can AI-assisted pre-review checks improve content quality and reduce reviewer re
 - TypeScript
 - Tailwind CSS
 - OpenAI API (with fallback mode)
+- `pdf-parse` for lightweight server-side PDF text extraction
 
 ## Notes
 - Includes mock fallback to ensure stable demo without API dependency
@@ -39,3 +41,6 @@ npm run dev
 ```
 
 If the key is missing, the app runs in mock mode automatically. Live mode activates automatically when `OPENAI_API_KEY` is present.
+
+## PDF Upload
+Users can upload a `.pdf` file directly in the draft input panel. The app extracts text through a lightweight server-side route using `pdf-parse` and places it into the draft textarea for review and editing before analysis.

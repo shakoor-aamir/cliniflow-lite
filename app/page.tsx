@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useState } from "react";
 import { KpiCard } from "@/components/ui/KpiCard";
 import { SectionCard } from "@/components/ui/SectionCard";
 import { SeverityBadge } from "@/components/ui/SeverityBadge";
@@ -62,6 +62,12 @@ type AnalysisHistoryItem = {
   documentType: DocumentType;
   content: string;
   result: AnalysisResponse;
+};
+
+type UploadState = {
+  fileName: string;
+  message?: string;
+  error?: string;
 };
 
 const documentTypes: DocumentType[] = [
@@ -277,10 +283,12 @@ export default function Home() {
   const [content, setContent] = useState("");
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isExtractingPdf, setIsExtractingPdf] = useState(false);
   const [result, setResult] = useState<AnalysisResponse | null>(null);
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [debugInfo, setDebugInfo] = useState<DebugInfo | null>(null);
   const [history, setHistory] = useState<AnalysisHistoryItem[]>([]);
+  const [uploadState, setUploadState] = useState<UploadState | null>(null);
 
   useEffect(() => {
     async function loadHealth() {
@@ -322,6 +330,94 @@ export default function Home() {
 
     writeHistory([]);
     setHistory([]);
+  };
+
+  const handleRemoveUploadedFile = () => {
+    setUploadState(null);
+  };
+
+  const handlePdfUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    console.log("PDF upload detected:", file.name);
+
+    if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
+      console.log("PDF extraction failed: unsupported file type");
+      setUploadState({
+        fileName: file.name,
+        error: "Only PDF files are supported.",
+      });
+      event.target.value = "";
+      return;
+    }
+
+    setIsExtractingPdf(true);
+    setUploadState({
+      fileName: file.name,
+      message: "Extracting text from PDF...",
+    });
+
+    try {
+      console.log("PDF extraction started:", file.name);
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch("/api/extract-pdf", {
+        method: "POST",
+        body: formData,
+      });
+
+      const payload = (await response.json()) as {
+        text?: string;
+        characterCount?: number;
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(
+          payload.error ??
+            "Unable to extract text from this PDF. Try another file or paste text manually.",
+        );
+      }
+
+      const extractedText = payload.text?.trim() ?? "";
+
+      if (!extractedText) {
+        console.log("PDF extraction failed: no extractable text found");
+        setUploadState({
+          fileName: file.name,
+          error: "The PDF contains little or no extractable text.",
+        });
+        return;
+      }
+
+      console.log("PDF extraction succeeded:", file.name);
+      console.log("Extracted character count:", extractedText.length);
+
+      setContent(extractedText);
+      setUploadState({
+        fileName: file.name,
+        message: `Text extracted successfully (${(payload.characterCount ?? extractedText.length).toLocaleString()} characters).`,
+      });
+      setError("");
+    } catch (uploadError) {
+      console.log("PDF extraction failed:", uploadError);
+      setUploadState({
+        fileName: file.name,
+        error:
+          uploadError instanceof Error
+            ? uploadError.message
+            : "Unable to extract text from this PDF. Try another file or paste text manually.",
+      });
+    } finally {
+      setIsExtractingPdf(false);
+      event.target.value = "";
+    }
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -470,6 +566,62 @@ export default function Home() {
                 </div>
 
                 <div className="space-y-2">
+                  <label htmlFor="pdfUpload" className="text-sm font-medium text-slate-700">
+                    PDF upload
+                  </label>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-slate-900">
+                          Upload a PDF to extract text into the draft area
+                        </p>
+                        <p className="mt-1 text-sm leading-6 text-slate-600">
+                          Extracted text can be reviewed and edited before analysis.
+                        </p>
+                      </div>
+                      <label className="inline-flex cursor-pointer items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:bg-slate-50">
+                        <input
+                          id="pdfUpload"
+                          type="file"
+                          accept=".pdf,application/pdf"
+                          className="sr-only"
+                          onChange={handlePdfUpload}
+                          disabled={isExtractingPdf}
+                        />
+                        {isExtractingPdf ? "Extracting PDF..." : "Upload PDF"}
+                      </label>
+                    </div>
+
+                    {uploadState ? (
+                      <div className="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div>
+                            <p className="text-sm font-medium text-slate-900">
+                              {uploadState.fileName}
+                            </p>
+                            {uploadState.message ? (
+                              <p className="mt-1 text-sm text-slate-600">
+                                {uploadState.message}
+                              </p>
+                            ) : null}
+                            {uploadState.error ? (
+                              <p className="mt-1 text-sm text-rose-700">{uploadState.error}</p>
+                            ) : null}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleRemoveUploadedFile}
+                            className="text-sm font-medium text-slate-600 transition hover:text-slate-900"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
                   <label htmlFor="content" className="text-sm font-medium text-slate-700">
                     Draft content
                   </label>
@@ -501,7 +653,7 @@ export default function Home() {
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <button
                     type="submit"
-                    disabled={isLoading || isTextareaEmpty}
+                    disabled={isLoading || isExtractingPdf || isTextareaEmpty}
                     className="inline-flex min-w-[160px] items-center justify-center rounded-xl bg-slate-950 px-5 py-3 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
                   >
                     {isLoading ? "Analyzing..." : "Analyze"}
