@@ -56,12 +56,23 @@ type StatusPresentation = {
   detail: string;
 };
 
+type AnalysisHistoryItem = {
+  id: string;
+  createdAt: string;
+  documentType: DocumentType;
+  content: string;
+  result: AnalysisResponse;
+};
+
 const documentTypes: DocumentType[] = [
   "Protocol Summary",
   "Clinical Study Report Section",
   "Investigator Communication",
   "Regulatory Response Draft",
 ];
+
+const HISTORY_STORAGE_KEY = "cliniflow-lite-recent-analyses";
+const MAX_HISTORY_ITEMS = 5;
 
 function getStatusPresentation(
   health: HealthResponse | null,
@@ -128,6 +139,55 @@ function getServiceNotice(meta: AnalysisResponse["_meta"]) {
   }
 
   return null;
+}
+
+function buildDebugInfo(result: AnalysisResponse): DebugInfo {
+  return {
+    mode: result._meta.mode,
+    apiStatus:
+      result._meta.mode === "live"
+        ? "Operational"
+        : result._meta.reason === "OPENAI_API_KEY missing"
+          ? "Mock mode active"
+          : "Fallback active after API error",
+    timestamp: result._meta.timestamp,
+    reason: result._meta.reason,
+    errorType: result._meta.errorType,
+    status: result._meta.status,
+  };
+}
+
+function readHistory(): AnalysisHistoryItem[] {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    const raw = window.localStorage.getItem(HISTORY_STORAGE_KEY);
+    if (!raw) {
+      return [];
+    }
+
+    const parsed = JSON.parse(raw) as AnalysisHistoryItem[];
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed.slice(0, MAX_HISTORY_ITEMS);
+  } catch {
+    return [];
+  }
+}
+
+function writeHistory(items: AnalysisHistoryItem[]) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(
+    HISTORY_STORAGE_KEY,
+    JSON.stringify(items.slice(0, MAX_HISTORY_ITEMS)),
+  );
 }
 
 function ResultPlaceholder() {
@@ -220,6 +280,7 @@ export default function Home() {
   const [result, setResult] = useState<AnalysisResponse | null>(null);
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [debugInfo, setDebugInfo] = useState<DebugInfo | null>(null);
+  const [history, setHistory] = useState<AnalysisHistoryItem[]>([]);
 
   useEffect(() => {
     async function loadHealth() {
@@ -238,6 +299,30 @@ export default function Home() {
 
     void loadHealth();
   }, []);
+
+  useEffect(() => {
+    setHistory(readHistory());
+  }, []);
+
+  const handleHistorySelect = (item: AnalysisHistoryItem) => {
+    setDocumentType(item.documentType);
+    setContent(item.content);
+    setResult(item.result);
+    setDebugInfo(buildDebugInfo(item.result));
+    setError("");
+  };
+
+  const handleClearHistory = () => {
+    if (typeof window !== "undefined") {
+      const confirmed = window.confirm("Clear recent analyses?");
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    writeHistory([]);
+    setHistory([]);
+  };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -274,18 +359,24 @@ export default function Home() {
       }
 
       setResult(payload);
-      setDebugInfo({
-        mode: payload._meta.mode,
-        apiStatus:
-          payload._meta.mode === "live"
-            ? "Operational"
-            : payload._meta.reason === "OPENAI_API_KEY missing"
-              ? "Mock mode active"
-              : "Fallback active after API error",
-        timestamp: payload._meta.timestamp,
-        reason: payload._meta.reason,
-        errorType: payload._meta.errorType,
-        status: payload._meta.status,
+      setDebugInfo(buildDebugInfo(payload));
+
+      const nextHistoryItem: AnalysisHistoryItem = {
+        id: `${payload._meta.timestamp}-${documentType}`,
+        createdAt: payload._meta.timestamp,
+        documentType,
+        content: trimmedContent,
+        result: payload,
+      };
+
+      setHistory((currentHistory) => {
+        const nextHistory = [
+          nextHistoryItem,
+          ...currentHistory.filter((item) => item.id !== nextHistoryItem.id),
+        ].slice(0, MAX_HISTORY_ITEMS);
+
+        writeHistory(nextHistory);
+        return nextHistory;
       });
     } catch (submissionError) {
       setResult(null);
@@ -447,6 +538,96 @@ export default function Home() {
                 explicit when live AI analysis is unavailable.
               </p>
             </div>
+
+            <SectionCard
+              title="Recent analyses"
+              description="The latest completed runs are stored locally in this browser for quick recall."
+            >
+              <div className="flex items-center justify-between gap-4">
+                <p className="text-sm text-slate-600">
+                  Select a previous run to reload its analysis output.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleClearHistory}
+                  disabled={history.length === 0}
+                  className="text-sm font-medium text-slate-600 transition hover:text-slate-900 disabled:cursor-not-allowed disabled:text-slate-300"
+                >
+                  Clear history
+                </button>
+              </div>
+
+              {history.length > 0 ? (
+                <div className="mt-4 space-y-3">
+                  {history.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => handleHistorySelect(item)}
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left transition hover:border-slate-300 hover:bg-white"
+                    >
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">
+                            {item.documentType}
+                          </p>
+                          <p className="mt-1 text-xs uppercase tracking-[0.14em] text-slate-500">
+                            {new Date(item.createdAt).toLocaleString("en-SE", {
+                              dateStyle: "medium",
+                              timeStyle: "short",
+                            })}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <StatusBadge
+                            tone={item.result._meta.mode === "live" ? "live" : "mock"}
+                            label={item.result._meta.mode === "live" ? "Live" : "Mock"}
+                          />
+                          <StatusBadge
+                            tone={item.result.readyForReview ? "live" : "mock"}
+                            label={item.result.readyForReview ? "Ready" : "Needs revision"}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                          <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">
+                            Quality score
+                          </p>
+                          <p className="mt-1 text-sm font-semibold text-slate-900">
+                            {item.result.qualityScore}/100
+                          </p>
+                        </div>
+                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                          <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">
+                            Review readiness
+                          </p>
+                          <p className="mt-1 text-sm font-semibold text-slate-900">
+                            {item.result.readyForReview ? "Ready for review" : "Revision recommended"}
+                          </p>
+                        </div>
+                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                          <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">
+                            Mode used
+                          </p>
+                          <p className="mt-1 text-sm font-semibold text-slate-900">
+                            {item.result._meta.mode === "live" ? "Live" : "Mock"}
+                          </p>
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5">
+                  <p className="text-sm leading-6 text-slate-600">
+                    No recent analyses yet. Completed runs will appear here and remain
+                    available after refresh on this device.
+                  </p>
+                </div>
+              )}
+            </SectionCard>
           </div>
 
           <div className="space-y-4">
